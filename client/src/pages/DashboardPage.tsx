@@ -6,7 +6,6 @@ import ProfileModal from "../components/profile/ProfileModal";
 import LocalBusinessesDashboard from "../components/local/LocalBusinessesDashboard";
 import OnlineCompaniesDashboard from "../components/online/OnlineCompaniesDashboard";
 
-
 type DashboardModule = "local" | "online";
 
 export default function DashboardPage() {
@@ -15,40 +14,8 @@ export default function DashboardPage() {
 
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
-
-  const [selectedLocalLeadIds, setSelectedLocalLeadIds] = useState<string[]>(
-    [],
-  );
-
-  const [selectedOnlineLeadIds, setSelectedOnlineLeadIds] = useState<string[]>(
-    [],
-  );
-
-  const selectedLeadIds =
-    dashboardModule === "local"
-      ? selectedLocalLeadIds
-      : selectedOnlineLeadIds;
-
-  async function handleAiActionExecuted(result: any) {
-    console.log("Action executed:", result);
-
-    /*
-     * Remount the active dashboard so its lead list, statistics,
-     * filters and selections are refreshed.
-     */
-    setDashboardRefreshKey((current) => current + 1);
-
-    /*
-     * Clear selection because an action may have deleted,
-     * retried or updated the selected records.
-     */
-    if (result.module === "local") {
-      setSelectedLocalLeadIds([]);
-    } else {
-      setSelectedOnlineLeadIds([]);
-    }
-  }
+  const [, setSelectedLocalLeadIds] = useState<string[]>([]);
+  const [, setSelectedOnlineLeadIds] = useState<string[]>([]);
 
   function handleModuleChange(module: DashboardModule) {
     setDashboardModule(module);
@@ -88,14 +55,12 @@ export default function DashboardPage() {
 
           {dashboardModule === "local" && (
             <LocalBusinessesDashboard
-              key={`local-${dashboardRefreshKey}`}
               onSelectionChange={setSelectedLocalLeadIds}
             />
           )}
 
           {dashboardModule === "online" && (
             <OnlineCompaniesDashboard
-              key={`online-${dashboardRefreshKey}`}
               onSelectionChange={setSelectedOnlineLeadIds}
             />
           )}
