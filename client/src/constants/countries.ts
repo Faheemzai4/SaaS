@@ -1,0 +1,15 @@
+export const COUNTRIES = [
+  { name: "United States", code: "US" },
+  { name: "United Kingdom", code: "GB" },
+  { name: "Canada", code: "CA" },
+  { name: "Australia", code: "AU" },
+  { name: "Germany", code: "DE" },
+  { name: "France", code: "FR" },
+  { name: "Italy", code: "IT" },
+  { name: "Spain", code: "ES" },
+  { name: "Pakistan", code: "PK" },
+  { name: "India", code: "IN" },
+  { name: "Japan", code: "JP" },
+  { name: "China", code: "CN" },
+  { name: "Custom...", code: "CUSTOM" },
+];
