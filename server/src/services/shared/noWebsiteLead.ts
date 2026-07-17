@@ -1,9 +1,9 @@
 import { supabase } from "../../config/supabase";
-import { analyzeWithGroq } from "./groq";
 import {
   parsePhoneNumberFromString,
   type CountryCode,
 } from "libphonenumber-js/max";
+
 import { getUserProfile } from "../profile/profileService";
 import { createProfilePromptContext } from "../profile/profilePromptContext";
 
@@ -16,11 +16,6 @@ type NoWebsiteInput = {
   countryCode: CountryCode;
   phone?: string;
   address?: string;
-};
-
-type GeneratedEmail = {
-  subject: string;
-  body: string;
 };
 
 function makeSlug(value: string) {
@@ -53,76 +48,21 @@ function normalizePhone(
 
 export async function createNoWebsiteLead(input: NoWebsiteInput) {
   const normalizedPhone = normalizePhone(input.phone, input.countryCode);
+
   const profile = await getUserProfile(input.userId);
   const profileContext = createProfilePromptContext(profile);
 
-  let email: GeneratedEmail = {
-    subject: `A possible opportunity for ${input.businessName}`,
-    body:
-      `Hi ${input.businessName},\n\n` +
-      `I came across your business and noticed a possible opportunity that may be relevant to the services I provide.\n\n` +
-      `Would you be open to a brief conversation?`,
-  };
+  const location = [input.city, input.state].filter(Boolean).join(", ");
 
-  try {
-    const prompt = `
-You are writing an optional reference email for a service provider.
+  const emailSubject = `A possible opportunity for ${input.businessName}`;
 
-The lead does not appear to have a website listed.
-
-SERVICE PROVIDER
-
-${profileContext}
-
-LEAD
-
-Business name:
-${input.businessName}
-
-Business type:
-${input.businessType}
-
-Location:
-${input.city}${input.state ? `, ${input.state}` : ""}
-
-Country code:
-${input.countryCode}
-
-Address:
-${input.address || "Unknown"}
-
-Public phone:
-${normalizedPhone || "Unknown"}
-
-INSTRUCTIONS
-
-Write an email explaining how the service provider's actual service may help this business.
-
-Important:
-- Use only the user-defined service profile above.
-- Do not assume any specific profession or service.
-- Do not invent additional services or professional titles.
-- Mention the absence of a website only when it is genuinely relevant to the user's service.
-- Do not invent prices, guarantees, results, credentials, or contact details.
-- Do not include placeholders.
-- The SaaS does not send this email.
-- Return JSON only.
-
-{
-  "subject": "...",
-  "body": "..."
-}
-`.trim();
-
-    email = await analyzeWithGroq<GeneratedEmail>(prompt, {
-      userId: input.userId,
-      source: "local",
-      module: "local",
-      operation: "no_website_email_reference",
-    });
-  } catch (error) {
-    console.error("No-website email generation failed:", error);
-  }
+  const emailBody =
+    `Hi ${input.businessName},\n\n` +
+    `I came across your business in ${location} and noticed that no website appears to be listed.\n\n` +
+    `Based on the service profile below, there may be an opportunity to help improve your online presence or customer experience.\n\n` +
+    `${profileContext}\n\n` +
+    `Would you be open to a brief conversation?\n\n` +
+    `Best regards`;
 
   const fakeUrl = `no-website:${makeSlug(
     [input.businessName, input.city, input.state, input.countryCode]
@@ -144,10 +84,10 @@ Important:
         h1: [],
         score: null,
         priority: "Medium",
-        estimatedImpact: "null",
+        estimatedImpact: null,
         summary: "No website was found for this business.",
         businessOpportunity:
-          "This business may have an opportunity that is relevant to the service provider's offering.",
+          "This business may benefit from improving its online presence.",
         issues: ["No website found."],
         emails: [],
         phones: normalizedPhone ? [normalizedPhone] : [],
@@ -158,16 +98,26 @@ Important:
           x: [],
         },
         status: "Not Contacted",
-        emailSubject: email.subject,
-        emailBody: email.body,
+        emailSubject,
+        emailBody,
         updatedAt: new Date().toISOString(),
+        analyzedAt: new Date().toISOString(),
       },
-      { onConflict: "user_id,url" },
+      {
+        onConflict: "user_id,url",
+      },
     )
     .select()
     .single();
 
   if (error) {
+    console.error("Failed to save no-website dummy lead:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+
     throw error;
   }
 

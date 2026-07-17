@@ -1,9 +1,5 @@
-import axios from "axios";
 import { Router } from "express";
-import {
-  isSupportedCountry,
-  type CountryCode,
-} from "libphonenumber-js/max";
+import { isSupportedCountry, type CountryCode } from "libphonenumber-js/max";
 
 import { searchBusinesses } from "../../services/local/businessSearch";
 import { resolveExistingLocalLead } from "../../services/local/existingLeadResolver";
@@ -18,14 +14,8 @@ router.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const {
-      businessType,
-      city,
-      state,
-      countryCode,
-      limit,
-      forceRefresh,
-    } = req.body;
+    const { businessType, city, state, countryCode, limit, forceRefresh } =
+      req.body;
 
     if (!businessType || !city || !countryCode) {
       return res.status(400).json({
@@ -33,10 +23,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    if (
-      forceRefresh !== undefined &&
-      typeof forceRefresh !== "boolean"
-    ) {
+    if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") {
       return res.status(400).json({
         message: "forceRefresh must be a boolean.",
       });
@@ -45,8 +32,7 @@ router.post("/", async (req, res) => {
     const normalizedBusinessType = String(businessType).trim();
     const normalizedCity = String(city).trim();
 
-    const normalizedState =
-      typeof state === "string" ? state.trim() : "";
+    const normalizedState = typeof state === "string" ? state.trim() : "";
 
     const normalizedCountryCode = String(countryCode)
       .trim()
@@ -132,10 +118,7 @@ router.post("/", async (req, res) => {
         forceRefresh: forceRefresh === true,
       });
 
-      if (
-        existingResolution.shouldReuse &&
-        existingResolution.existingLead
-      ) {
+      if (existingResolution.shouldReuse && existingResolution.existingLead) {
         results.push({
           businessName: business.name,
           website: existingResolution.existingLead.url,
@@ -154,10 +137,7 @@ router.post("/", async (req, res) => {
         continue;
       }
 
-      if (
-        existingResolution.shouldSkip &&
-        existingResolution.existingLead
-      ) {
+      if (existingResolution.shouldSkip && existingResolution.existingLead) {
         results.push({
           businessName: business.name,
           website: existingResolution.existingLead.url,
@@ -168,8 +148,7 @@ router.post("/", async (req, res) => {
           phone: business.phone,
           address: business.address,
           success:
-            existingResolution.existingLead.status !==
-            "Needs Manual Review",
+            existingResolution.existingLead.status !== "Needs Manual Review",
           reused: false,
           skipped: true,
           skipReason: existingResolution.reason,
@@ -179,19 +158,15 @@ router.post("/", async (req, res) => {
         continue;
       }
 
-      const lead = await processWebsite(
-        business.website,
-        userId,
-        {
-          businessName: business.name,
-          businessType: normalizedBusinessType,
-          city: normalizedCity,
-          state: normalizedState,
-          countryCode: normalizedCountryCode,
-          phone: business.phone,
-          address: business.address,
-        },
-      );
+      const lead = await processWebsite(business.website, userId, {
+        businessName: business.name,
+        businessType: normalizedBusinessType,
+        city: normalizedCity,
+        state: normalizedState,
+        countryCode: normalizedCountryCode,
+        phone: business.phone,
+        address: business.address,
+      });
 
       results.push({
         businessName: business.name,
@@ -209,17 +184,11 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const successfulCount = results.filter(
-      (result) => result.success,
-    ).length;
+    const successfulCount = results.filter((result) => result.success).length;
 
-    const reusedCount = results.filter(
-      (result) => result.reused,
-    ).length;
+    const reusedCount = results.filter((result) => result.reused).length;
 
-    const skippedCount = results.filter(
-      (result) => result.skipped,
-    ).length;
+    const skippedCount = results.filter((result) => result.skipped).length;
 
     const noWebsiteCount = results.filter(
       (result) => result.website === null,
@@ -254,25 +223,14 @@ router.post("/", async (req, res) => {
       results,
     });
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      console.error("Local discovery failed:", {
-        message: error.message,
-        code: error.code,
-        status: error.response?.status,
-      });
-    } else {
-      console.error(
-        "Local discovery failed:",
-        error instanceof Error ? error.message : error,
-      );
-    }
+    console.error(
+      "Local discovery failed:",
+      error instanceof Error ? error.message : error,
+    );
 
     return res.status(500).json({
       message: "Local discovery failed",
-      error:
-        error instanceof Error
-          ? error.message
-          : JSON.stringify(error),
+      error: error instanceof Error ? error.message : JSON.stringify(error),
     });
   }
 });
