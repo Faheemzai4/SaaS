@@ -8,7 +8,7 @@ import discoverRoutes from "./routes/local/discover.routes";
 import onlineDiscoverRouter from "./routes/online/discover.routes";
 import onlineLeadRoutes from "./routes/online/lead.routes";
 import onlineStatsRoutes from "./routes/online/stats.routes";
-import { requireAuth } from "./middleware/requireAuth";
+import { requireAuth } from "./middleware/requireAuth";   
 import usageRoutes from "./routes/usage.routes";
 import profileRoutes from "./routes/profile.routes";
 
