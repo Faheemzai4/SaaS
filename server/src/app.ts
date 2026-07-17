@@ -43,10 +43,12 @@ app.use("/profile", requireAuth, profileRoutes);
 // usage
 app.use("/usage", requireAuth, usageRoutes);
 
+app.get("/debug/supabase", (_req, res) => {
+  const supabaseUrl = process.env.SUPABASE_URL || "";
 
-app.get("/", (_, res) => {
   res.json({
-    message: "AI Sales Agent API Running",
+    connected: Boolean(supabaseUrl),
+    projectRef: supabaseUrl.replace("https://", "").replace(".supabase.co", ""),
   });
 });
 
