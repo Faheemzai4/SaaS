@@ -1,20 +1,15 @@
 import { Router } from "express";
+import { isSupportedCountry, type CountryCode } from "libphonenumber-js/max";
 
 import { searchOnlineCompanies } from "../../services/online/companySearch";
+import { processOnlineCompanies } from "../../services/online/onlineLeadDiscovery";
+import { safeTrackUsage } from "../../services/usage/usageTracker";
+
 import type {
   EcommercePlatform,
   OnlineBusinessModel,
   OnlineDiscoverInput,
 } from "../../types/onlineCompany";
-import {
-  getOnlineSearchCache,
-  renewOnlineSearchCache,
-  saveOnlineSearchCache,
-} from "../../services/online/cache/searchCache";
-import { processOnlineCompanies } from "../../services/online/onlineLeadDiscovery";
-import { runOnlineCacheRefreshWorker } from "../../services/online/cache/refreshWorker";
-import { isSupportedCountry, type CountryCode } from "libphonenumber-js/max";
-import { safeTrackUsage } from "../../services/usage/usageTracker";
 
 const router = Router();
 
@@ -26,11 +21,16 @@ const validBusinessModels: OnlineBusinessModel[] = [
   "other",
 ];
 
-const validPlatforms: EcommercePlatform[] = ["shopify", "woocommerce", "any"];
+const validPlatforms: EcommercePlatform[] = [
+  "shopify",
+  "woocommerce",
+  "any",
+];
 
 router.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
+
     const {
       keywords,
       businessModel,
@@ -43,7 +43,10 @@ router.post("/", async (req, res) => {
       forceRefresh,
     } = req.body as OnlineDiscoverInput;
 
-    if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") {
+    if (
+      forceRefresh !== undefined &&
+      typeof forceRefresh !== "boolean"
+    ) {
       return res.status(400).json({
         message: "forceRefresh must be a boolean.",
       });
@@ -58,7 +61,10 @@ router.post("/", async (req, res) => {
       });
     }
 
-    if (businessModel && !validBusinessModels.includes(businessModel)) {
+    if (
+      businessModel &&
+      !validBusinessModels.includes(businessModel)
+    ) {
       return res.status(400).json({
         message:
           "businessModel must be ecommerce, saas, agency, marketplace, or other.",
@@ -71,9 +77,11 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const parsedPage = page === undefined ? 1 : Number(page);
+    const parsedPage =
+      page === undefined ? 1 : Number(page);
 
-    const parsedLimit = limit === undefined ? 5 : Number(limit);
+    const parsedLimit =
+      limit === undefined ? 5 : Number(limit);
 
     if (!Number.isInteger(parsedPage) || parsedPage < 1) {
       return res.status(400).json({
@@ -92,7 +100,9 @@ router.post("/", async (req, res) => {
     }
 
     const normalizedCountryCode =
-      typeof countryCode === "string" ? countryCode.trim().toUpperCase() : "";
+      typeof countryCode === "string"
+        ? countryCode.trim().toUpperCase()
+        : "";
 
     if (
       normalizedCountryCode &&
@@ -107,9 +117,15 @@ router.post("/", async (req, res) => {
       keywords: normalizedKeywords,
       businessModel,
 
-      industry: typeof industry === "string" ? industry.trim() : undefined,
+      industry:
+        typeof industry === "string"
+          ? industry.trim()
+          : undefined,
 
-      country: typeof country === "string" ? country.trim() : undefined,
+      country:
+        typeof country === "string"
+          ? country.trim()
+          : undefined,
 
       countryCode: normalizedCountryCode || undefined,
 
@@ -135,34 +151,34 @@ router.post("/", async (req, res) => {
         page: parsedPage,
         requestedLimit: parsedLimit,
         forceRefresh: forceRefresh === true,
+        mode: "mock",
       },
     });
 
-    const cache = await getOnlineSearchCache(searchInput);
-
-    let companies = cache.cachedResults;
-
-    if (!cache.hasEnoughResults) {
-      console.log("Online cache miss.");
-
-      companies = await searchOnlineCompanies(searchInput, userId);
-
-      await saveOnlineSearchCache(searchInput, companies);
-    } else {
-      console.log(`Online cache hit (${companies.length} companies).`);
-
-      await renewOnlineSearchCache(cache.cacheKey);
-
-      console.log("Online cache expiry renewed for another 7 days.");
-
-      companies = companies.slice(0, parsedLimit);
-    }
-
-    const results = await processOnlineCompanies(
-      companies,
+    /*
+     * The project now generates mock online companies.
+     * No Brave Search API and no search cache are used.
+     */
+    const companies = await searchOnlineCompanies(
       searchInput,
       userId,
     );
+
+    const limitedCompanies = companies.slice(0, parsedLimit);
+
+    const results = await processOnlineCompanies(
+      limitedCompanies,
+      searchInput,
+      userId,
+    );
+
+    const successfulCount = results.filter(
+      (result) => result.success,
+    ).length;
+
+    const reusedCount = results.filter(
+      (result) => result.reused,
+    ).length;
 
     return res.status(200).json({
       filters: {
@@ -175,41 +191,30 @@ router.post("/", async (req, res) => {
         forceRefresh: searchInput.forceRefresh ?? false,
       },
 
+      mode: "mock",
+
       page: parsedPage,
       limit: parsedLimit,
 
-      discovered: companies.length,
-      successful: results.filter((result) => result.success).length,
-      failed: results.filter((result) => !result.success).length,
-      reused: results.filter((result) => result.reused).length,
-      processed: results.filter((result) => result.success && !result.reused)
-        .length,
+      discovered: limitedCompanies.length,
+      successful: successfulCount,
+      failed: results.length - successfulCount,
+      reused: reusedCount,
+      processed: results.filter(
+        (result) => result.success && !result.reused,
+      ).length,
+
+      cache: "disabled",
 
       results,
     });
   } catch (error) {
-    console.error("FULL ONLINE DISCOVER ERROR:", error);
+    console.error("ONLINE DISCOVER ERROR:", error);
 
     const message =
       error instanceof Error
         ? error.message
         : "Online company discovery failed.";
-
-    if (message.includes("is missing")) {
-      return res.status(500).json({ message });
-    }
-
-    if (message.includes("authentication failed")) {
-      return res.status(401).json({ message });
-    }
-
-    if (message.includes("denied")) {
-      return res.status(403).json({ message });
-    }
-
-    if (message.includes("rate limit")) {
-      return res.status(429).json({ message });
-    }
 
     if (
       message.includes("required") ||
@@ -220,34 +225,6 @@ router.post("/", async (req, res) => {
     }
 
     return res.status(500).json({ message });
-  }
-});
-
-router.post("/refresh-cache", async (req, res) => {
-  try {
-    const requestedBatchSize = Number(req.body?.batchSize);
-    const batchSize =
-      Number.isInteger(requestedBatchSize) && requestedBatchSize > 0
-        ? requestedBatchSize
-        : 10;
-
-    const result = await runOnlineCacheRefreshWorker(batchSize);
-
-    return res.status(200).json({
-      message: "Online cache refresh worker completed.",
-      ...result,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Online cache refresh worker failed.";
-
-    console.error("Online cache refresh worker route failed:", error);
-
-    return res.status(500).json({
-      message,
-    });
   }
 });
 

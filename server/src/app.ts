@@ -15,8 +15,6 @@ import extensionLeadRoutes from "./routes/extension/lead.routes";
 import { requireAuth } from "./middleware/requireAuth";
 import usageRoutes from "./routes/usage.routes";
 import profileRoutes from "./routes/profile.routes";
-import aiChatRoutes from "./routes/aiChat.routes";
-import aiActionRoutes from "./routes/aiAction.routes";
 
 const app = express();
 
@@ -45,9 +43,6 @@ app.use("/profile", requireAuth, profileRoutes);
 // usage
 app.use("/usage", requireAuth, usageRoutes);
 
-// aiChat
-app.use("/ai/chat", requireAuth, aiChatRoutes);
-app.use("/ai/actions", requireAuth, aiActionRoutes);
 
 app.get("/", (_, res) => {
   res.json({

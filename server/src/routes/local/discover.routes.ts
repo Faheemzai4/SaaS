@@ -1,29 +1,31 @@
 import axios from "axios";
 import { Router } from "express";
-import { isSupportedCountry, type CountryCode } from "libphonenumber-js/max";
+import {
+  isSupportedCountry,
+  type CountryCode,
+} from "libphonenumber-js/max";
 
 import { searchBusinesses } from "../../services/local/businessSearch";
+import { resolveExistingLocalLead } from "../../services/local/existingLeadResolver";
+
 import { processWebsite } from "../../services/shared/leadDiscovery";
 import { createNoWebsiteLead } from "../../services/shared/noWebsiteLead";
-import { generateCacheKey } from "../../services/local/cache/cacheKey";
-
-import type { BusinessLead } from "../../services/local/businessSearch";
-import { remainingDays } from "../../services/local/cache/cacheExpiry";
-import { queueRefresh } from "../../services/local/cache/refreshWorker";
-import { resolveExistingLocalLead } from "../../services/local/existingLeadResolver";
 import { safeTrackUsage } from "../../services/usage/usageTracker";
-import {
-  getCachedSearch,
-  saveCachedSearch,
-} from "../../services/local/cache/searchCache";
 
 const router = Router();
 
 router.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
-    const { businessType, city, state, countryCode, limit, forceRefresh } =
-      req.body;
+
+    const {
+      businessType,
+      city,
+      state,
+      countryCode,
+      limit,
+      forceRefresh,
+    } = req.body;
 
     if (!businessType || !city || !countryCode) {
       return res.status(400).json({
@@ -31,11 +33,20 @@ router.post("/", async (req, res) => {
       });
     }
 
-    if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") {
+    if (
+      forceRefresh !== undefined &&
+      typeof forceRefresh !== "boolean"
+    ) {
       return res.status(400).json({
         message: "forceRefresh must be a boolean.",
       });
     }
+
+    const normalizedBusinessType = String(businessType).trim();
+    const normalizedCity = String(city).trim();
+
+    const normalizedState =
+      typeof state === "string" ? state.trim() : "";
 
     const normalizedCountryCode = String(countryCode)
       .trim()
@@ -47,7 +58,12 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const searchLimit = Number(limit) || 5;
+    const requestedLimit = Number(limit);
+    const searchLimit =
+      Number.isInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 100)
+        : 5;
+
     await safeTrackUsage({
       userId,
       eventType: "local_search",
@@ -55,124 +71,27 @@ router.post("/", async (req, res) => {
       creditsUsed: 1,
       source: "local",
       metadata: {
-        businessType: String(businessType).trim(),
-
-        city: String(city).trim(),
-
-        state: typeof state === "string" ? state.trim() : "",
-
+        businessType: normalizedBusinessType,
+        city: normalizedCity,
+        state: normalizedState,
         countryCode: normalizedCountryCode,
-
         requestedLimit: searchLimit,
-
         forceRefresh: forceRefresh === true,
+        mode: "mock",
       },
     });
 
-    const cacheKey = generateCacheKey({
-      businessType,
-      city,
-      state,
+    /*
+     * The project now uses dummy/generated business data.
+     * No Foursquare request and no search cache are used here.
+     */
+    const businesses = await searchBusinesses({
+      businessType: normalizedBusinessType,
+      city: normalizedCity,
+      state: normalizedState,
       countryCode: normalizedCountryCode,
+      limit: searchLimit,
     });
-
-    //
-    let businesses: BusinessLead[];
-
-    const cachedSearch = await getCachedSearch(cacheKey);
-
-    const cachedBusinesses: BusinessLead[] = Array.isArray(
-      cachedSearch?.results,
-    )
-      ? (cachedSearch.results as BusinessLead[])
-      : [];
-
-    let cacheStatus: "hit" | "partial" | "miss";
-
-    if (cachedBusinesses.length >= searchLimit) {
-      console.log(
-        `✅ Cache hit: returning ${searchLimit} from ${cachedBusinesses.length}`,
-      );
-
-      cacheStatus = "hit";
-      businesses = cachedBusinesses.slice(0, searchLimit);
-
-      if (cachedSearch && remainingDays(cachedSearch.expires_at) <= 2) {
-        queueRefresh({
-          businessType,
-          city,
-          state,
-          countryCode: normalizedCountryCode,
-        });
-      }
-    } else {
-      cacheStatus = cachedBusinesses.length > 0 ? "partial" : "miss";
-
-      const missingCount = searchLimit - cachedBusinesses.length;
-
-      console.log(
-        `🌍 Cache ${cacheStatus}: have ${cachedBusinesses.length}, need ${missingCount} more`,
-      );
-
-      const freshBusinesses = await searchBusinesses({
-        businessType,
-        city,
-        state,
-        countryCode: normalizedCountryCode,
-
-        // Request the complete desired amount because the endpoint
-        // cannot start from result number 6.
-        limit: searchLimit,
-      });
-
-      const cachedKeys = new Set(
-        cachedBusinesses.map((business) => {
-          if (business.website) {
-            return `website:${business.website.trim().toLowerCase()}`;
-          }
-
-          return `business:${business.name.trim().toLowerCase()}:${(
-            business.address || ""
-          )
-            .trim()
-            .toLowerCase()}`;
-        }),
-      );
-
-      const newBusinesses = freshBusinesses.filter((business) => {
-        const key = business.website
-          ? `website:${business.website.trim().toLowerCase()}`
-          : `business:${business.name.trim().toLowerCase()}:${(
-              business.address || ""
-            )
-              .trim()
-              .toLowerCase()}`;
-
-        return !cachedKeys.has(key);
-      });
-
-      const additionalBusinesses = newBusinesses.slice(0, missingCount);
-
-      businesses = [...cachedBusinesses, ...additionalBusinesses].slice(
-        0,
-        searchLimit,
-      );
-
-      const updatedCache = [...cachedBusinesses, ...additionalBusinesses];
-
-      await saveCachedSearch({
-        cacheKey,
-        businessType,
-        city,
-        state,
-        results: updatedCache,
-      });
-
-      console.log(
-        `💾 Cache updated: ${cachedBusinesses.length} cached + ${additionalBusinesses.length} new = ${businesses.length}`,
-      );
-    }
-    //
 
     const results = [];
 
@@ -180,13 +99,11 @@ router.post("/", async (req, res) => {
       if (!business.website) {
         const lead = await createNoWebsiteLead({
           userId,
-
           businessName: business.name,
-          businessType,
-          city,
-          state,
+          businessType: normalizedBusinessType,
+          city: normalizedCity,
+          state: normalizedState,
           countryCode: normalizedCountryCode,
-
           phone: business.phone,
           address: business.address,
         });
@@ -194,9 +111,9 @@ router.post("/", async (req, res) => {
         results.push({
           businessName: business.name,
           website: null,
-          businessType,
-          city,
-          state,
+          businessType: normalizedBusinessType,
+          city: normalizedCity,
+          state: normalizedState,
           countryCode: normalizedCountryCode,
           phone: business.phone,
           address: business.address,
@@ -215,17 +132,16 @@ router.post("/", async (req, res) => {
         forceRefresh: forceRefresh === true,
       });
 
-      if (existingResolution.shouldReuse && existingResolution.existingLead) {
-        console.log(
-          `⚡ Reusing fresh completed Local lead: ${business.website}`,
-        );
-
+      if (
+        existingResolution.shouldReuse &&
+        existingResolution.existingLead
+      ) {
         results.push({
           businessName: business.name,
           website: existingResolution.existingLead.url,
-          businessType,
-          city,
-          state,
+          businessType: normalizedBusinessType,
+          city: normalizedCity,
+          state: normalizedState,
           countryCode: normalizedCountryCode,
           phone: business.phone,
           address: business.address,
@@ -238,55 +154,51 @@ router.post("/", async (req, res) => {
         continue;
       }
 
-      if (existingResolution.shouldSkip && existingResolution.existingLead) {
-        console.log(`⏸ Skipping Local lead processing: ${business.website}`, {
-          reason: existingResolution.reason,
-        });
-
+      if (
+        existingResolution.shouldSkip &&
+        existingResolution.existingLead
+      ) {
         results.push({
           businessName: business.name,
           website: existingResolution.existingLead.url,
-          businessType,
-          city,
-          state,
+          businessType: normalizedBusinessType,
+          city: normalizedCity,
+          state: normalizedState,
           countryCode: normalizedCountryCode,
           phone: business.phone,
           address: business.address,
-
           success:
-            existingResolution.existingLead.status !== "Needs Manual Review",
-
+            existingResolution.existingLead.status !==
+            "Needs Manual Review",
           reused: false,
           skipped: true,
-
           skipReason: existingResolution.reason,
-
           lead: existingResolution.existingLead,
         });
 
         continue;
       }
-      console.log(`Processing Local lead: ${business.website}`, {
-        reason: existingResolution.reason,
-        forceRefresh: forceRefresh === true,
-      });
 
-      const lead = await processWebsite(business.website, userId, {
-        businessName: business.name,
-        businessType,
-        city,
-        state,
-        countryCode: normalizedCountryCode,
-        phone: business.phone,
-        address: business.address,
-      });
+      const lead = await processWebsite(
+        business.website,
+        userId,
+        {
+          businessName: business.name,
+          businessType: normalizedBusinessType,
+          city: normalizedCity,
+          state: normalizedState,
+          countryCode: normalizedCountryCode,
+          phone: business.phone,
+          address: business.address,
+        },
+      );
 
       results.push({
         businessName: business.name,
         website: lead?.url || business.website,
-        businessType,
-        city,
-        state,
+        businessType: normalizedBusinessType,
+        city: normalizedCity,
+        state: normalizedState,
         countryCode: normalizedCountryCode,
         phone: business.phone,
         address: business.address,
@@ -297,61 +209,70 @@ router.post("/", async (req, res) => {
       });
     }
 
+    const successfulCount = results.filter(
+      (result) => result.success,
+    ).length;
+
+    const reusedCount = results.filter(
+      (result) => result.reused,
+    ).length;
+
+    const skippedCount = results.filter(
+      (result) => result.skipped,
+    ).length;
+
     const noWebsiteCount = results.filter(
       (result) => result.website === null,
     ).length;
 
-    const processedWebsiteCount = results.filter(
+    const processedCount = results.filter(
       (result) =>
         result.success &&
         !result.reused &&
         !result.skipped &&
         result.website !== null,
     ).length;
-    const skippedCount = results.filter((result) => result.skipped).length;
 
     return res.json({
-      businessType,
-      city,
-      state,
+      businessType: normalizedBusinessType,
+      city: normalizedCity,
+      state: normalizedState,
       countryCode: normalizedCountryCode,
       limit: searchLimit,
       forceRefresh: forceRefresh === true,
+      mode: "mock",
 
       total: results.length,
-
-      successful: results.filter((result) => result.success).length,
-
-      failed: results.filter((result) => !result.success).length,
-
-      reused: results.filter((result) => result.reused).length,
-
-      processed: processedWebsiteCount,
-
+      successful: successfulCount,
+      failed: results.length - successfulCount,
+      reused: reusedCount,
+      processed: processedCount,
       skipped: skippedCount,
-
       noWebsite: noWebsiteCount,
 
-      cache: cacheStatus,
+      cache: "disabled",
       results,
     });
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      console.error("Discovery failed:", {
+      console.error("Local discovery failed:", {
         message: error.message,
         code: error.code,
         status: error.response?.status,
       });
     } else {
       console.error(
-        "Discovery failed:",
+        "Local discovery failed:",
         error instanceof Error ? error.message : error,
       );
     }
 
     return res.status(500).json({
-      message: "Discovery failed",
-      error: error instanceof Error ? error.message : JSON.stringify(error),
+      message: "Local discovery failed",
+      error:
+        error instanceof Error
+          ? error.message
+          : JSON.stringify(error),
     });
   }
 });
